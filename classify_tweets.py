@@ -19,7 +19,7 @@ load_dotenv(override=True)
 
 API_KEY = os.getenv("GEMINI_API_KEY2")
 if not API_KEY:
-    raise EnvironmentError("GEMINI_API_KEY was not found in the environment variables.")
+    raise EnvironmentError("GEMINI_API_KEY2 was not found in the environment variables.")
 
 client = genai.Client(api_key=API_KEY)
 
@@ -29,7 +29,7 @@ BATCH_SIZE = 25          # 12k tweets / 25 = 480 requests < 500 RPD limit
 MAX_WORKERS = 1
 RPM_LIMIT = 13           # safe margin under the 15 RPM quota
 RPD_LIMIT = 490          # safe margin under the 500 RPD quota
-CHECKPOINT_FILE = "classify_checkpoint.csv"
+CHECKPOINT_FILE = "classify_checkpoint_v2.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -131,48 +131,114 @@ def build_batch_prompt(tweets: list[str]) -> str:
     return f"""
 You are an expert in political discourse analysis for social media.
 
-Task: Classify each of the following {len(tweets)} tweets independently.
+Your task is to classify each tweet independently.
+
+----------------------------------------
+TASK
+----------------------------------------
 
 For EACH tweet, assign:
 
-1. Exactly ONE topic from this closed list:
-- Economy and Employment (taxes, inflation, jobs, economic policy)
-- Welfare, Housing and Social Policy (healthcare, education, housing, social benefits)
-- National Politics and Governance (government, laws, political actors, institutions)
-- International Affairs (foreign policy, EU, global conflicts, diplomacy)
-- Immigration and Security (immigration, borders, crime, public security)
-- Rights and Equality (gender equality, civil rights, minority rights)
-- Other (if none of the above apply)
+1. ONE topic from this list:
+- Economy and Employment
+- Welfare, Housing and Social Policy
+- National Politics and Governance
+- International Affairs
+- Immigration and Security
+- Rights and Equality
+- Other
 
-2. Exactly ONE stance from this closed list:
+2. ONE stance:
 - In favor
 - Against
 - Neutral
 - Unclear
 
-3. A confidence score between 0 and 1.
-Confidence calibration rules:
-- Use 0.95 only when the topic and stance are completely explicit.
-- Use 0.80-0.90 when the classification is clear but requires minor interpretation.
-- Use 0.60-0.75 when the tweet is ambiguous or context-dependent.
-- Use below 0.60 when the tweet is short, vague, ironic, or incomplete.
-- Avoid using 1.0 except for extremely obvious cases.
+3. A confidence score between 0 and 1
+- Confidence is an approximate measure of certainty, not an exact probability.
 
-4. A very short justification, maximum 25 words.
+4. A short justification, maximum 25 words
 
-Important rules:
-- Classify each tweet independently. Do not let one tweet influence another.
-- Focus only on the content of each tweet.
-- Do not invent context that is not present in the tweet.
-- Use the descriptions only as guidance.
-- Return the "index" field matching the tweet number shown in brackets.
-- The "results" array must contain exactly the same number of items as input tweets.
-- In the "topic" field, return only the category name, without parentheses or extra text.
-- If the topic is not clearly one of the predefined categories, use Other.
-- If the stance cannot be inferred clearly, use Unclear.
-- Return only valid JSON, no extra text.
+----------------------------------------
+IMPORTANT RULES
+----------------------------------------
 
-Tweets:
+- Classify each tweet independently.
+- Do NOT use context outside the tweet.
+- Do NOT infer intent that is not explicitly expressed.
+- If the tweet is descriptive, informational, ironic, or ambiguous, use "Unclear".
+- If no clear opinion is expressed, use "Unclear".
+- Only assign "In favor" or "Against" when the stance is clearly explicit.
+- Use "Neutral" only when the tweet clearly presents a balanced or non-positioned statement.
+- Follow the instructions strictly. Do not deviate from the schema.
+
+----------------------------------------
+CONFIDENCE CALIBRATION
+----------------------------------------
+
+Use the following scale:
+
+- 0.95: explicit topic and explicit stance, no ambiguity
+- 0.85: clear classification but requires minor interpretation
+- 0.70: somewhat ambiguous or indirect
+- 0.60: very ambiguous, vague, ironic, incomplete, or unclear stance
+
+Avoid always using high values.
+Use lower scores when uncertain.
+
+----------------------------------------
+EXAMPLES
+----------------------------------------
+
+Tweet: "The government must reduce taxes immediately."
+Topic: Economy and Employment
+Stance: In favor
+Confidence: 0.95
+Justification: Explicit support for tax reduction.
+
+Tweet: "Another debate in parliament today."
+Topic: National Politics and Governance
+Stance: Unclear
+Confidence: 0.60
+Justification: Descriptive, no opinion expressed.
+
+Tweet: "Immigration policies are destroying our country."
+Topic: Immigration and Security
+Stance: Against
+Confidence: 0.95
+Justification: Strong negative opinion on immigration.
+
+Tweet: "Housing remains one of the biggest issues in Spain."
+Topic: Welfare, Housing and Social Policy
+Stance: Unclear
+Confidence: 0.70
+Justification: Mentions issue without clear stance.
+
+----------------------------------------
+OUTPUT FORMAT
+----------------------------------------
+
+Return ONLY valid JSON using this schema:
+
+{{
+  "results": [
+    {{
+      "index": int,
+      "topic": str,
+      "stance": str,
+      "confidence": float,
+      "short_justification": str
+    }}
+  ]
+}}
+
+The number of results MUST match the number of tweets.
+The "index" must match the tweet number.
+
+----------------------------------------
+TWEETS
+----------------------------------------
+
 {numbered_tweets}
 """.strip()
 
@@ -405,7 +471,7 @@ def classify_dataframe(
 
 if __name__ == "__main__":
     INPUT_CSV = "complete_tweets_clean_llm_ready.csv"
-    OUTPUT_CSV = "classified_all_tweets_final.csv"
+    OUTPUT_CSV = "classified_all_tweets_final_v2.csv"
 
     print(f"Loading {INPUT_CSV}...")
     df_input = pd.read_csv(INPUT_CSV)
